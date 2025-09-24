@@ -20,8 +20,8 @@ else
     MOUNT_EXIST="OK!"
     # echo "Subject: [REPORT]: Storage: ${MOUNT_EXIST} Date: $ds on $hostnamev" >$fname
     # printf "\n\n" >>$fname
-    printf "Run /bin/bkp_new.sh!\n\n" >$fname
-    /bin/bkp_new.sh >>$fname 2>&1
+    printf "Run /home/saplingadmin/vm_backup_scripts/bkp_new.sh!\n\n" >$fname
+    /home/saplingadmin/vm_backup_scripts/bkp_new.sh >>$fname 2>&1
     printf "\r\n\r\n" >>$fname
     df -H | grep ubuntu--vg-ubuntu--lv | column -t>> $fname
     printf "\r\n\r\nBR," >>$fname
