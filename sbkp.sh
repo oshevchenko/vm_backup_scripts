@@ -1,5 +1,5 @@
 #!/bin/bash
-real_backup_dir=/home/sapukr
+real_backup_dir="/home/sapukr"
 ds=`date +%Y-%m-%d`
 hostnamev="$(hostname)"
 to=("oleksandrs@sapling-inc.com shevchenko.adb@gmail.com sean@voree.net evgenyr@sapling-inc.com")
@@ -12,7 +12,7 @@ umount ${real_backup_dir}
 mount -a
 
 # check if /home/sapukr is mounted
-MOUNT_EXIST=$(mount | grep "${real_backup_dir}")
+MOUNT_EXIST=$(mount | grep ${real_backup_dir})
 if [ -z "$MOUNT_EXIST" ]; then
     MOUNT_EXIST="ERROR!"
     printf "No network storage available! Do not run /bin/bkp_new.sh!\n\n" >$fname
