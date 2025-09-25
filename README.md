@@ -106,9 +106,202 @@ Switch VM back from snapshot
 virsh blockcommit win-sql-server-2019-0 sda --active --verbose --pivot
 virsh blockcommit gitlab-ce0 vda --active --verbose --pivot
 ```
-Remove the snapshots
+Merge the snapshot into the parent image.
 ```
 rm -rf /var/lib/libvirt/images/ubuntu20.04.snapshot-last
 rm -rf /var/lib/libvirt/images/SQLServer.snapshot-last
 
+```
+
+
+
+## Restore from error "cannot acquire state change lock (held by monitor=remoteDispatchDomainBlockJobAbort)".
+- Sometimes the virtual machine could not be restarted or stopped and the following error is reported:
+```
+$ virsh destroy win-sql-server-2019-0
+error: Failed to destroy domain win-sql-server-2019-0
+error: Timed out during operation: cannot acquire state change lock
+(held by monitor=remoteDispatchDomainBlockJobAbort)
+```
+- To exit this state restart libvirtd
+
+
+```
+sudo su
+[sudo] password for saplingadmin: 
+root@sap-lin-15:/home/saplingadmin# systemctl restart libvirtd
+```
+- Restart the VMs.
+- Check the output of the command virsh domblklist:
+
+
+```
+# virsh list
+ Id   Name                    State
+---------------------------------------
+ 17   win-sql-server-2019-0   running
+ 18   gitlab-ce0              running
+# virsh domblklist win-sql-server-2019-0 | awk 'NR>2'
+ sda      /var/lib/libvirt/images/SQLServer.snapshot-last
+```
+- If the name ends with .snapshot-last  we should do the blockcommit operation to go back to SQLServer.qcow2 instead of snapshot. Otherwise the following updates will not work.
+
+```
+# virsh blockcommit win-sql-server-2019-0 sda --active --verbose --pivot
+Block commit: [100 %]
+Successfully pivoted
+root@sap-lin-15:/home/saplingadmin# virsh domblklist win-sql-server-2019-0 | awk 'NR>2'
+ sda      /var/lib/libvirt/images/SQLServer.qcow2
+```
+Same for gitlab-ce0:
+```
+# virsh domblklist gitlab-ce0  | awk 'NR>2'
+ vda      /var/lib/libvirt/images/ubuntu20.04.snapshot-last
+# virsh blockcommit gitlab-ce0 vda --active --verbose --pivot
+Block commit: [100 %]
+Successfully pivoted
+
+# virsh domblklist gitlab-ce0  | awk 'NR>2'
+ vda      /var/lib/libvirt/images/ubuntu20.04.qcow2
+```
+## Restore backup
+The message from IT guys looks like this:
+```
+Hi Oleksandr,
+It seems the CIP server SQL database has gotten corrupted.
+After working with OrCAD support they are suggesting to restore the VM to the state it was on 4/23.
+I restored the snapshot file from the datto on 4/23 at 6pm. You can access it here:
+\\192.168.1.104\Sapling-UKR-18-00-02-Apr-23-25
+Please let me know if you have any questions.
+Kind Regards,
+```
+
+- Stop backups schedule:
+```
+crontab -e
+```
+- Comment out:
+```
+#1 0 * * * /bin/sbkp.sh >/dev/null 2>&1 
+#0 * * * * /bin/checkmount.sh >/dev/null 2>&1
+```
+- Modify /etc/fstab
+
+```
+//192.168.1.104/Sapling-UKR-18-00-02-Apr-23-25 /mnt/Sapling-UKR-18-00-02-Apr-23-25 cifs username=Saplingadmin,password=**********,_netdev,sec=ntlmv2i 0  0
+```
+- Mount
+```
+mount -a
+```
+- Remove tarball:
+```
+rm -rf /root/sap-lin-15.tar
+rm -rf /root/bkps/*
+```
+- Copy file:
+```
+nohup rsync --progress /mnt/Sapling-UKR-18-00-02-Apr-23-25/100/sap-lin-15.tar /root/bkps/ > /root/bkps/copy.log 2>&1 &
+```
+- Check copy progress:
+```
+tail -f /root/bkps/copy.log
+```
+- Shut down VM and remove the VM image:
+```
+virsh list
+virsh shutdown win-sql-server-2019-0
+rm /var/lib/libvirt/images/SQLServer.qcow2
+```
+- Check the content:
+```
+# tar tvf sap-lin-15.tar
+drwxr-xr-x root/root         0 2025-04-23 00:01 ./
+drwxr-xr-x root/root         0 2025-04-23 00:01 ./gitlab-ce0/
+-rw-r--r-- libvirt-qemu/kvm 314638204928 2025-04-23 00:01 ./gitlab-ce0/ubuntu20.04.qcow2
+-rw-r--r-- root/root                8566 2025-04-23 00:01 ./gitlab-ce0/gitlab-ce0.xml
+drwxr-xr-x root/root                   0 2025-04-23 00:01 ./win-sql-server-2019-0/
+-rw------- libvirt-qemu/kvm 204336726016 2025-04-23 00:01 ./win-sql-server-2019-0/SQLServer.qcow2
+-rw-r--r-- root/root                7582 2025-04-23 00:01 ./win-sql-server-2019-0/win-sql-server-2019-0.xml
+```
+- Un-tar the .qcow2 and .xml files:
+```
+nohup tar -xvf sap-lin-15.tar ./win-sql-server-2019-0/win-sql-server-2019-0.xml ./win-sql-server-2019-0/SQLServer.qcow2 > /root/bkps/untar.log 2>&1 &
+tail -f /root/bkps/untar.log
+```
+- Move the VM image:
+```
+mv ./win-sql-server-2019-0/SQLServer.qcow2 /var/lib/libvirt/images/SQLServer.qcow2
+```
+- Set correct permissions and ownership:
+```
+chown libvirt-qemu:kvm /var/lib/libvirt/images/SQLServer.qcow2
+chmod 644 /var/lib/libvirt/images/SQLServer.qcow2
+```
+- Restore the VM Definition from the .xml file. The .xml file defines the VM's configuration (CPU, RAM, disk, NIC, etc.). Use virsh to define the VM from this file. This command registers the VM with libvirt using the settings in the .xml file without starting it.
+```
+virsh define ./win-sql-server-2019-0/win-sql-server-2019-0.xml
+```
+- Verify the VM is registered. You should see win-sql-server-2019-0 (or the name given in the XML file) listed.
+
+
+```
+virsh list --all
+ Id   Name                    State
+----------------------------------------
+ 2    gitlab-ce0              running
+ -    win-sql-server-2019-0   shut off
+```
+- Finally, start the VM:
+```
+virsh start win-sql-server-2019-0
+```
+## Resize QCOW2 image
+- Go to respective directory:
+
+```
+# cd /var/lib/libvirt/images
+```
+- Stop the VM: 
+
+```
+# virsh list
+ Id   Name                    State
+---------------------------------------
+ 2    win-sql-server-2019-0   running
+ 3    gitlab-ce0              running
+# virsh shutdown gitlab-ce0
+Domain gitlab-ce0 is being shutdown
+```
+- Check image info:
+```
+# qemu-img info ubuntu20.04.qcow2 
+image: ubuntu20.04.qcow2
+file format: qcow2
+virtual size: 612 GiB (657129996800 bytes)
+disk size: 130 GiB
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    lazy refcounts: true
+    refcount bits: 16
+    corrupt: false
+
+
+# virt-df -h  ubuntu20.04.qcow2
+Filesystem                                Size       Used  Available  Use%
+ubuntu20.04.qcow2:/dev/sda1               511M       4.0K       511M    1%
+ubuntu20.04.qcow2:/dev/sda5               601G        39G       536G    7%
+```
+- Shrink the image:
+```
+nohup virt-sparsify  ubuntu20.04.qcow2 ubuntu20.04_shrink.qcow2 > /tmp/virt-sparsify.log 2>&1 &
+tail -f /tmp/virt-sparsify.log
+# 
+[   0.0] Create overlay file in /tmp to protect source disk
+[   0.1] Examine source disk
+[   2.3] Fill free space in /dev/sda1 with zero
+[   3.4] Fill free space in /dev/sda5 with zero
+ 100% ⟦▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒⟧ 00:00
+[3382.0] Copy to destination and make sparse
 ```
