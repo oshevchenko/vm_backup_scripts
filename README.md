@@ -101,12 +101,12 @@ drwxr-xr-x root/root                  0 2025-09-25 00:01 ./win-sql-server-2019-0
 -rw-r--r-- libvirt-qemu/kvm 221632528384 2025-09-25 00:01 ./win-sql-server-2019-0/SQLServer.qcow2
 -rw-r--r-- root/root                7580 2025-09-25 00:01 ./win-sql-server-2019-0/win-sql-server-2019-0.xml
 ```
-Switch VM back from snapshot
+Merge the snapshot into the parent image.
 ```
 virsh blockcommit win-sql-server-2019-0 sda --active --verbose --pivot
 virsh blockcommit gitlab-ce0 vda --active --verbose --pivot
 ```
-Merge the snapshot into the parent image.
+Remove the snapshots.
 ```
 rm -rf /var/lib/libvirt/images/ubuntu20.04.snapshot-last
 rm -rf /var/lib/libvirt/images/SQLServer.snapshot-last
@@ -123,13 +123,10 @@ error: Failed to destroy domain win-sql-server-2019-0
 error: Timed out during operation: cannot acquire state change lock
 (held by monitor=remoteDispatchDomainBlockJobAbort)
 ```
-- To exit this state restart libvirtd
-
+- To exit this state restart libvirtd. Run command as root:
 
 ```
-sudo su
-[sudo] password for saplingadmin: 
-root@sap-lin-15:/home/saplingadmin# systemctl restart libvirtd
+# systemctl restart libvirtd
 ```
 - Restart the VMs.
 - Check the output of the command virsh domblklist:
